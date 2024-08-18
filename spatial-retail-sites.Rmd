@@ -1,0 +1,118 @@
+---
+title: "Spatial Analysis for Retail Site Selection"
+author: "Felipe O. Cerezer"
+date: "`r Sys.Date()`"
+output: pdf_document
+theme: paper
+---
+
+# 1. Required Libraries
+
+We will use the following R packages: - `sf` for handling spatial data - `raster` for working with raster data - `spatstat` for point pattern analysis - `dplyr` for data manipulation
+
+
+```{r}
+## Install required packages if not already installed
+#install.packages(c("sf", "raster", "spatstat", "dplyr"))
+
+## Load libraries
+library(sf)
+library(raster)
+library(spatstat)
+library(dplyr)
+library(ape)
+```
+
+
+# 2. Generating Fake Data
+
+First, I will generate some fake spatial and demographic data, including locations of existing stores, population density, and average income.
+
+```{r}
+set.seed(42) # For reproducibility
+
+# Create a simple grid of points representing potential store locations
+locations <- expand.grid(x = seq(0, 10, by = 1), y = seq(0, 10, by = 1))
+
+# Convert to sf object
+locations_sf <- st_as_sf(locations, coords = c("x", "y"), crs = 4326)
+
+# Generate random population density and income data
+locations_sf$population_density <- rnorm(nrow(locations_sf), mean = 1000, sd = 300)
+locations_sf$income <- rnorm(nrow(locations_sf), mean = 50000, sd = 10000)
+
+# Plot the data
+plot(locations_sf)
+```
+
+####### Explanation: Here, I create a grid of potential store locations and generate random values for population density and income at these locations.
+
+# 3. Spatial Autocorrelation
+
+Next, I will calculate spatial autocorrelation to understand the spatial dependency of population density and income. I will use Moran's I, a measure of spatial autocorrelation.
+
+```{r}
+# Calculate spatial weights matrix using inverse distance
+coords <- st_coordinates(locations_sf)
+dist_matrix <- as.matrix(dist(coords))
+inv_dist_matrix <- 1 / dist_matrix
+diag(inv_dist_matrix) <- 0
+
+# Calculate Moran's I for population density
+moran_population <- Moran.I(locations_sf$population_density, inv_dist_matrix)
+print(moran_population)
+
+# Calculate Moran's I for income
+moran_income <- Moran.I(locations_sf$income, inv_dist_matrix)
+print(moran_income)
+```
+
+####### Explanation: Moran's I is useful to understand if high or low values of population density and income are clustered in space. A significant Moran’s I value indicates that the variable is not randomly distributed but shows a spatial pattern.
+
+# 4. Point Pattern Analysis
+
+I will analyze the pattern of existing store locations to determine if they are clustered, randomly distributed, or regularly spaced.
+
+```{r}
+# Generate random existing store locations
+n_stores <- 15
+existing_stores <- data.frame(x = runif(n_stores, 0, 10), y = runif(n_stores, 0, 10))
+existing_stores_sf <- st_as_sf(existing_stores, coords = c("x", "y"), crs = 4326)
+
+# Convert to ppp object for spatstat analysis
+store_ppp <- as.ppp(st_coordinates(existing_stores_sf), W = owin(c(0, 10), c(0, 10)))
+
+# Perform Ripley's K analysis
+K <- Kest(store_ppp)
+plot(K)
+
+# Perform Quadrat test for spatial uniformity
+quadrat_test <- quadrat.test(store_ppp, nx = 5, ny = 5)
+print(quadrat_test)
+plot(quadrat_test)
+```
+
+####### Explanation: Ripley's K function and the Quadrat test allow us to determine the spatial pattern of existing stores. This can be used to understand whether stores are clustered, randomly distributed, or evenly spaced, which can inform where new stores should be placed to avoid supersaturation.
+
+# 5. Identifying Optimal Retail Locations
+
+Now, I will identify the optimal locations for new retail stores by combining the demographic data (population density and income) with the results of the previous spatial analyses.
+
+```{r}
+# Define a simple scoring system: higher population density and income is better
+locations_sf$score <- scale(locations_sf$population_density) + scale(locations_sf$income)
+
+# Select top 5 locations based on the score
+top_locations <- locations_sf %>% 
+  arrange(desc(score)) %>% 
+  slice(1:5)
+
+# Plot the top locations
+plot(st_geometry(locations_sf), col = "lightgrey")
+plot(st_geometry(existing_stores_sf), col = "red", add = TRUE)
+plot(st_geometry(top_locations), col = "blue", pch = 19, cex = 1.5, add = TRUE)
+legend("topright", legend = c("Existing Stores", "Top Locations"), col = c("red", "blue"), pch = 19)
+```
+
+
+####### Explanation: I combined the population density and income data into a single score that ranks each location based on its suitability for a new store. The top 5 locations with the highest scores are selected as the best options for new stores. This final visualization shows the selected optimal locations on the map (in blue), alongside existing stores (in red).
